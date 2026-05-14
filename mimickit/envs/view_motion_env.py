@@ -31,6 +31,8 @@ class ViewMotionEnv(char_env.CharEnv):
                                           name="character",
                                           start_pos=self._init_root_pos.cpu().numpy(),
                                           start_rot=self._init_root_rot.cpu().numpy(),
+                                          start_dof_pos=self._init_dof_pos.cpu().numpy(),
+                                          dof_names=self._get_1d_dof_names(),
                                           enable_self_collisions=False,
                                           disable_motors=True,
                                           color=color)

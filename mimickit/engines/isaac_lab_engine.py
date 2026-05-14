@@ -37,7 +37,7 @@ def str_to_key_code(key_str):
 
 class ObjCfg:
     def __init__(self, obj_type, asset_file, is_visual, enable_self_collisions, 
-                fix_root, start_pos, start_rot, color, disable_motors):
+                fix_root, start_pos, start_rot, start_dof_pos, dof_names, color, disable_motors):
         self.obj_type = obj_type
         self.asset_file = asset_file
         self.is_visual = is_visual
@@ -45,6 +45,8 @@ class ObjCfg:
         self.fix_root = fix_root
         self.start_pos = start_pos
         self.start_rot = start_rot
+        self.start_dof_pos = start_dof_pos
+        self.dof_names = dof_names
         self.color = color
         self.disable_motors = disable_motors
         return
@@ -56,7 +58,14 @@ class ObjCfg:
         is_same &= self.enable_self_collisions == other.enable_self_collisions
         is_same &= self.fix_root == other.fix_root
         is_same &= self.disable_motors == other.disable_motors
+        is_same &= self._array_equal(self.start_dof_pos, other.start_dof_pos)
+        is_same &= self.dof_names == other.dof_names
         return is_same
+
+    def _array_equal(self, a, b):
+        if (a is None or b is None):
+            return a is b
+        return np.array_equal(a, b)
 
 
 class IsaacLabEngine(engine.Engine):
@@ -149,7 +158,7 @@ class IsaacLabEngine(engine.Engine):
 
     def create_obj(self, env_id, obj_type, asset_file, name, is_visual=False, enable_self_collisions=True, 
                    fix_root=False, start_pos=None, start_rot=None, 
-                   color=None, disable_motors=False):
+                   start_dof_pos=None, dof_names=None, color=None, disable_motors=False):
         if (start_rot is None):
             start_rot = np.array([1.0, 0.0, 0.0, 0.0])
         else:
@@ -159,6 +168,11 @@ class IsaacLabEngine(engine.Engine):
             start_pos = np.array([0.0, 0.0, 0.0])
         else:
             start_pos = start_pos.copy()
+
+        if (start_dof_pos is not None):
+            start_dof_pos = np.array(start_dof_pos, dtype=np.float32).copy()
+        if (dof_names is not None):
+            dof_names = list(dof_names)
         
         start_pos[0] += self._env_offsets[env_id, 0]
         start_pos[1] += self._env_offsets[env_id, 1]
@@ -170,6 +184,8 @@ class IsaacLabEngine(engine.Engine):
                          fix_root=fix_root, 
                          start_pos=start_pos, 
                          start_rot=start_rot,
+                         start_dof_pos=start_dof_pos,
+                         dof_names=dof_names,
                          color=color, 
                          disable_motors=disable_motors)
         
@@ -904,6 +920,21 @@ class IsaacLabEngine(engine.Engine):
             self._disable_prim_collisions(prim_path)
 
         return prim
+
+    def _build_init_joint_pos_dict(self, obj_cfg):
+        if (obj_cfg.start_dof_pos is None or obj_cfg.dof_names is None):
+            return None
+
+        dof_pos = np.asarray(obj_cfg.start_dof_pos).reshape(-1)
+        dof_names = obj_cfg.dof_names
+        assert(len(dof_names) == dof_pos.shape[0]), \
+            "Number of DOF names must match initial DOF positions"
+
+        joint_pos = dict()
+        for name, pos in zip(dof_names, dof_pos):
+            joint_pos[name] = float(pos)
+
+        return joint_pos
     
     def _build_articulated_prim(self, env_id, obj_id, obj_cfg):
         import isaaclab.sim as sim_utils
@@ -938,7 +969,12 @@ class IsaacLabEngine(engine.Engine):
         actuator_cfg = self._build_actuator_cfg(control_mode)
 
         prim_path = OBJ_PATH_TEMPLATE.format(env_id, obj_id)
-        init_state = ArticulationCfg.InitialStateCfg(pos=obj_cfg.start_pos, rot=obj_cfg.start_rot)
+        init_joint_pos = self._build_init_joint_pos_dict(obj_cfg)
+        if (init_joint_pos is None):
+            init_state = ArticulationCfg.InitialStateCfg(pos=obj_cfg.start_pos, rot=obj_cfg.start_rot)
+        else:
+            init_state = ArticulationCfg.InitialStateCfg(pos=obj_cfg.start_pos, rot=obj_cfg.start_rot,
+                                                        joint_pos=init_joint_pos)
         
         art_cfg = ArticulationCfg(prim_path=prim_path, spawn=usd_cfg, collision_group=0,
                                   init_state=init_state,
@@ -981,7 +1017,15 @@ class IsaacLabEngine(engine.Engine):
         actuator_cfg = self._build_actuator_cfg(control_mode)
 
         regex = OBJ_PATH_TEMPLATE.format(".*", obj_id)
-        multi_obj_cfg = ArticulationCfg(prim_path=regex, spawn=None, actuators={"actuators": actuator_cfg})
+        init_joint_pos = self._build_init_joint_pos_dict(obj_cfg)
+        if (init_joint_pos is None):
+            init_state = ArticulationCfg.InitialStateCfg()
+        else:
+            init_state = ArticulationCfg.InitialStateCfg(joint_pos=init_joint_pos)
+
+        multi_obj_cfg = ArticulationCfg(prim_path=regex, spawn=None,
+                                        init_state=init_state,
+                                        actuators={"actuators": actuator_cfg})
         multi_obj_prim = Articulation(multi_obj_cfg)
 
         return multi_obj_prim

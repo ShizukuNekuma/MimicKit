@@ -87,8 +87,25 @@ class CharEnv(sim_env.SimEnv):
                                           name="character",
                                           start_pos=self._init_root_pos.cpu().numpy(),
                                           start_rot=self._init_root_rot.cpu().numpy(),
+                                          start_dof_pos=self._init_dof_pos.cpu().numpy(),
+                                          dof_names=self._get_1d_dof_names(),
                                           color=color)
         return char_id
+
+    def _get_1d_dof_names(self):
+        dof_names = []
+        num_joints = self._kin_char_model.get_num_joints()
+
+        for j in range(1, num_joints):
+            joint = self._kin_char_model.get_joint(j)
+            dof_dim = joint.get_dof_dim()
+
+            if (dof_dim == 1):
+                dof_names.append(joint.name)
+            elif (dof_dim > 1):
+                return None
+
+        return dof_names
     
     def _build_kin_char_model(self, char_file):
         _, file_ext = os.path.splitext(char_file)

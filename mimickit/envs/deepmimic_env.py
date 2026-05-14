@@ -323,6 +323,8 @@ class DeepMimicEnv(char_env.CharEnv):
                                           name="ref_character",
                                           is_visual=True,
                                           enable_self_collisions=False,
+                                          start_dof_pos=self._init_dof_pos.cpu().numpy(),
+                                          dof_names=self._get_1d_dof_names(),
                                           disable_motors=True,
                                           color=color)
         return char_id
