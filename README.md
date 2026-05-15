@@ -19,6 +19,7 @@ Instructions for each method are available here:
 
 Project-specific reproduction notes:
 - [GO2 Isaac Lab reproduction](docs/README_GO2_ISAAC_LAB.md)
+- [GO2 pace deployment](docs/README_GO2_DEPLOY.md)
 
 ---
 

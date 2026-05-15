@@ -58,6 +58,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metric", action="append", default=[], help="Override metric as algorithm:key, e.g. amp:Disc_Reward_Mean.")
     parser.add_argument("--position_key", default="body_pos_err")
     parser.add_argument("--velocity_key", default="dof_vel_err")
+    parser.add_argument("--seed_lines", action="store_true", help="Plot one learning-curve line per seed instead of mean +/- std.")
+    parser.add_argument("--curve_metric", default="", help="Use one training-log metric for all learning curves, e.g. Body_Pos_Err.")
+    parser.add_argument("--combined_seed_lines", action="store_true", help="Plot all algorithms and seeds for each motion in a single figure.")
     return parser.parse_args()
 
 
@@ -131,6 +134,7 @@ def plot_learning_curves(
     metrics: dict[str, str],
     x_key: str,
     max_samples: float | None,
+    seed_lines: bool,
 ) -> int:
     out_dir = root / "figures"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -138,23 +142,37 @@ def plot_learning_curves(
     for algorithm in algorithms:
         y_key = metrics[algorithm]
         for motion in motions:
-            curves = []
+            curve_items = []
             for seed in seeds:
                 curve = read_log(log_path(root, algorithm, motion, seed), x_key, y_key, max_samples)
                 if curve is not None:
-                    curves.append(curve)
+                    curve_items.append((seed, curve))
+            curve_seeds = [seed for seed, _ in curve_items]
+            curves = [curve for _, curve in curve_items]
             aligned = align_curves(curves)
             if aligned is None:
                 continue
 
             xs, ys = aligned
-            mean_y = np.mean(ys, axis=0)
-            std_y = np.std(ys, axis=0)
             fig, ax = plt.subplots(figsize=(6.0, 4.0))
             color = COLORS.get(algorithm, "#444444")
-            ax.plot(xs, mean_y, color=color, linewidth=2.0, label=f"{ALG_LABELS[algorithm]} ({len(curves)} seed(s))")
-            if len(curves) > 1:
-                ax.fill_between(xs, mean_y - std_y, mean_y + std_y, color=color, alpha=0.18)
+            if seed_lines:
+                line_styles = ["-", "--", ":", "-."]
+                for idx, seed in enumerate(curve_seeds):
+                    ax.plot(
+                        xs,
+                        ys[idx],
+                        color=color,
+                        linestyle=line_styles[idx % len(line_styles)],
+                        linewidth=1.8,
+                        label=f"seed {seed}",
+                    )
+            else:
+                mean_y = np.mean(ys, axis=0)
+                std_y = np.std(ys, axis=0)
+                ax.plot(xs, mean_y, color=color, linewidth=2.0, label=f"{ALG_LABELS[algorithm]} ({len(curves)} seed(s))")
+                if len(curves) > 1:
+                    ax.fill_between(xs, mean_y - std_y, mean_y + std_y, color=color, alpha=0.18)
             ax.set_title(f"{ALG_LABELS[algorithm]} {MOTION_LABELS.get(motion, motion)}")
             ax.set_xlabel(x_key)
             ax.set_ylabel(y_key)
@@ -163,10 +181,72 @@ def plot_learning_curves(
             ax.legend()
             fig.tight_layout()
             stem = f"{algorithm}_{motion}_{y_key.lower()}"
+            if seed_lines:
+                stem += "_seed_lines"
             fig.savefig(out_dir / f"{stem}.png", dpi=220)
             fig.savefig(out_dir / f"{stem}.pdf")
             plt.close(fig)
             made += 1
+    return made
+
+
+def metric_label(key: str) -> str:
+    labels = {
+        "Body_Pos_Err": "Position Tracking Error [m]",
+        "Dof_Vel_Err": "DoF Velocity Tracking Error [rad/s]",
+    }
+    return labels.get(key, key)
+
+
+def plot_combined_seed_lines(
+    root: Path,
+    algorithms: list[str],
+    motions: list[str],
+    seeds: list[int],
+    y_key: str,
+    x_key: str,
+    max_samples: float | None,
+) -> int:
+    out_dir = root / "figures"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    made = 0
+    line_styles = ["-", "--", ":"]
+    for motion in motions:
+        fig, ax = plt.subplots(figsize=(7.0, 4.4))
+        plotted = 0
+        for algorithm in algorithms:
+            color = COLORS.get(algorithm, "#444444")
+            for idx, seed in enumerate(seeds):
+                curve = read_log(log_path(root, algorithm, motion, seed), x_key, y_key, max_samples)
+                if curve is None:
+                    continue
+                xs, ys = curve
+                ax.plot(
+                    xs,
+                    ys,
+                    color=color,
+                    linestyle=line_styles[idx % len(line_styles)],
+                    linewidth=1.8,
+                    alpha=0.95,
+                    label=f"{ALG_LABELS[algorithm]} seed {seed}",
+                )
+                plotted += 1
+        if plotted == 0:
+            plt.close(fig)
+            continue
+
+        ax.set_title(f"GO2 - {MOTION_LABELS.get(motion, motion)}")
+        ax.set_xlabel(x_key)
+        ax.set_ylabel(metric_label(y_key))
+        ax.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
+        ax.grid(linestyle="dotted", alpha=0.7)
+        ax.legend(ncol=3, fontsize=8)
+        fig.tight_layout()
+        stem = f"{motion}_{y_key.lower()}_all_seed_lines"
+        fig.savefig(out_dir / f"{stem}.png", dpi=220)
+        fig.savefig(out_dir / f"{stem}.pdf")
+        plt.close(fig)
+        made += 1
     return made
 
 
@@ -330,7 +410,13 @@ def main() -> None:
     algorithms = select(args.algorithms, ALGORITHMS)
     motions = select(args.motions, MOTIONS)
     metrics = metric_map(args.metric)
-    made = plot_learning_curves(root, algorithms, motions, args.seeds, metrics, args.x_key, args.max_samples)
+    if args.combined_seed_lines:
+        y_key = args.curve_metric or args.position_key
+        made = plot_combined_seed_lines(root, algorithms, motions, args.seeds, y_key, args.x_key, args.max_samples)
+    else:
+        if args.curve_metric:
+            metrics = {algorithm: args.curve_metric for algorithm in algorithms}
+        made = plot_learning_curves(root, algorithms, motions, args.seeds, metrics, args.x_key, args.max_samples, args.seed_lines)
     rows = make_rows(root, algorithms, motions, args.seeds, args.position_key, args.velocity_key)
     write_tracking_csv(root, rows, algorithms)
     write_tracking_markdown(root, rows, algorithms)

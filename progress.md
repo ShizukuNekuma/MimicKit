@@ -31,16 +31,30 @@ summarized in commit or PR text.
   `start_go2_supervised_training.py` starts detached training and installs a
   systemd user timer; `monitor_go2_training.py --alert_codex` generates an
   agent prompt and launches `codex exec` for new issues.
+- Added persistent supervision-agent audit files for alert inputs and outputs:
+  timestamped `alert_*.md`, `agent_prompt_*.md`, `snapshot_*.md`,
+  `agent_alert_*.log`, plus `agent_audit.jsonl`.
+- Archived the previous GO2 reproduction outputs under
+  `output/go2_reproduction/archived_runs/20260514_211026/`.
 
 ## In Progress
 
-- Review before commit: inspect diffs and decide whether generated report
-  outputs under `output/go2_reproduction/` should be committed or kept local.
+- Fresh full GO2 training is running detached as
+  `go2_full_motion_major_20260514`, using motion-major order over
+  DeepMimic/AMP/ADD, motions `all`, seeds `0 1 2`, `num_envs=4096`, and
+  `max_samples=300000000`.
+- The systemd user timer
+  `go2_full_motion_major_20260514-monitor.timer` checks training every
+  1800 seconds and triggers `codex exec` on new monitor issues.
+- Pace evaluation for DeepMimic/AMP/ADD seeds `0 1 2` completed with
+  `num_envs=4096` and `test_episodes=4096`. Pace-only return/tracking tables
+  and per-seed learning-curve figures were generated under
+  `output/go2_reproduction/tables/` and `output/go2_reproduction/figures/`.
 
 ## Bugs And Risks
 
-- Full ADD training/evaluation has not been completed yet.
-- Full seven-motion, three-seed reproduction has not been run.
+- The fresh full seven-motion, three-seed reproduction is currently running;
+  final completion, evaluation, plots, tables, and videos are still pending.
 - Video recording can hang in Isaac/Kit shutdown paths; use per-job timeouts
   and avoid running video export inside an attached Codex session.
 - Existing deadline outputs include an intentionally mixed provenance for
@@ -71,7 +85,10 @@ summarized in commit or PR text.
 
 ## Next Steps
 
-1. Inspect diffs for `AGENTS.md`, `progress.md`, docs, and GO2 tools.
-2. Decide what generated outputs, if any, belong in version control.
-3. After this cleanup is committed, resume the full ADD and remaining
-   motion/seed matrix when compute time is available.
+1. Monitor `output/go2_reproduction/monitor/latest.md` and the systemd timer
+   journal while the detached run proceeds.
+2. When training completes, run GO2 test, video, collection, and report-output
+   commands from `docs/README_GO2_ISAAC_LAB.md`.
+3. Inspect diffs for `progress.md` and GO2 tools before committing source
+   changes; keep generated `output/` artifacts local unless deliberately
+   selected for version control.

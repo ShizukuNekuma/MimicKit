@@ -403,6 +403,11 @@ def run_codex(args: argparse.Namespace, prompt_file: Path, log_file: Path) -> in
     return proc.pid
 
 
+def append_agent_audit(monitor_dir: Path, state: dict[str, Any]) -> None:
+    with (monitor_dir / "agent_audit.jsonl").open("a") as f:
+        f.write(json.dumps(state, sort_keys=True) + "\n")
+
+
 def maybe_alert(args: argparse.Namespace, payload: dict[str, Any], monitor_dir: Path) -> None:
     issues = payload["issues"]
     state_path = monitor_dir / "alert_state.json"
@@ -421,10 +426,14 @@ def maybe_alert(args: argparse.Namespace, payload: dict[str, Any], monitor_dir: 
         return
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    snapshot_file = monitor_dir / "latest.md"
-    alert_file = monitor_dir / "alert.md"
-    prompt_file = monitor_dir / "agent_prompt.md"
+    latest_snapshot_file = monitor_dir / "latest.md"
+    latest_alert_file = monitor_dir / "alert.md"
+    latest_prompt_file = monitor_dir / "agent_prompt.md"
+    snapshot_file = monitor_dir / f"snapshot_{timestamp}.md"
+    alert_file = monitor_dir / f"alert_{timestamp}.md"
+    prompt_file = monitor_dir / f"agent_prompt_{timestamp}.md"
     agent_log_file = monitor_dir / f"agent_alert_{timestamp}.log"
+    snapshot_file.write_text(latest_snapshot_file.read_text())
 
     alert_lines = [
         "# GO2 Training Alert",
@@ -441,8 +450,13 @@ def maybe_alert(args: argparse.Namespace, payload: dict[str, Any], monitor_dir: 
             f"- `{issue['algorithm']}/{issue['motion']}/seed_{issue['seed']}`: "
             f"{issue['state']}; samples={samples}; {issue['issue']}"
         )
-    alert_file.write_text("\n".join(alert_lines) + "\n")
-    prompt_file.write_text(agent_prompt(payload, alert_file, snapshot_file))
+    alert_text = "\n".join(alert_lines) + "\n"
+    alert_file.write_text(alert_text)
+    latest_alert_file.write_text(alert_text)
+
+    prompt_text = agent_prompt(payload, alert_file, snapshot_file)
+    prompt_file.write_text(prompt_text)
+    latest_prompt_file.write_text(prompt_text)
 
     triggered: list[dict[str, Any]] = []
     if args.alert_command:
@@ -458,13 +472,19 @@ def maybe_alert(args: argparse.Namespace, payload: dict[str, Any], monitor_dir: 
         "last_alert_at": payload["generated_at"],
         "issues": issues,
         "alert_file": str(alert_file),
+        "latest_alert_file": str(latest_alert_file),
         "prompt_file": str(prompt_file),
+        "latest_prompt_file": str(latest_prompt_file),
+        "snapshot_file": str(snapshot_file),
+        "latest_snapshot_file": str(latest_snapshot_file),
+        "agent_log_file": str(agent_log_file),
         "triggered": triggered,
         "status": "alerted" if triggered else "written",
     }
     write_alert_state(state_path, state)
     with (monitor_dir / "alerts.jsonl").open("a") as f:
         f.write(json.dumps(state, sort_keys=True) + "\n")
+    append_agent_audit(monitor_dir, state)
 
 
 def main() -> None:
